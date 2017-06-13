@@ -49,49 +49,41 @@ module Database.LevelDB.Higher
     ) where
 
 
-import           Control.Monad.Reader
-import           Control.Monad.Writer
-import           Data.Word                         (Word32)
+import Control.Concurrent (ThreadId)
+import Control.Concurrent.MVar.Lifted
+import Control.Monad.Base (MonadBase(..))
+import Control.Monad.Catch (MonadCatch (..), MonadMask (..))
+import Control.Monad.Reader
+import Control.Monad.Trans.Control
+import Control.Monad.Trans.Resource
+import Control.Monad.Writer
+import Data.ByteString (ByteString)
+import Data.Default (def)
+import Data.Serialize (encode, decode)
+import Data.Word (Word32)
+import Database.LevelDB hiding (put, get, delete, write, withSnapshot)
+import qualified Control.Monad.Trans.Cont as Cont
+import qualified Control.Monad.Trans.Identity as Identity
+import qualified Control.Monad.Trans.List as List
+import qualified Control.Monad.Trans.Maybe as Maybe
+import qualified Control.Monad.Trans.RWS as RWS
+import qualified Control.Monad.Trans.RWS.Strict as Strict
+import qualified Control.Monad.Trans.State as State
+import qualified Control.Monad.Trans.State.Strict as Strict
+import qualified Control.Monad.Trans.Writer as Writer
+import qualified Control.Monad.Trans.Writer.Strict as Strict
+import qualified Data.ByteString as BS
+import qualified Database.LevelDB as LDB
 
 #if !MIN_VERSION_base(4,8,0)
 import           Control.Applicative               (Applicative)
 #endif
-import           Control.Monad.Base                (MonadBase(..))
-
-import           Control.Concurrent.MVar.Lifted
-import           Control.Concurrent                (ThreadId)
-
-import qualified Data.ByteString                   as BS
-import           Data.ByteString                   (ByteString)
-import           Data.Serialize                    (encode, decode)
-
-import           Data.Default                      (def)
-import qualified Database.LevelDB                  as LDB
-import           Database.LevelDB
-    hiding (put, get, delete, write, withSnapshot)
-import           Control.Monad.Trans.Resource
-import           Control.Monad.Trans.Control
-import           Control.Monad.Catch               (MonadCatch (..)
-                                                   , MonadMask (..))
-
 
 #if MIN_VERSION_mtl(2,2,1)
-import qualified Control.Monad.Except              as Except
+import qualified Control.Monad.Except as Except
 #else
 import qualified Control.Monad.Trans.Error as Error
 #endif
-
-
-import qualified Control.Monad.Trans.Cont          as Cont
-import qualified Control.Monad.Trans.Identity      as Identity
-import qualified Control.Monad.Trans.List          as List
-import qualified Control.Monad.Trans.Maybe         as Maybe
-import qualified Control.Monad.Trans.State         as State
-import qualified Control.Monad.Trans.Writer        as Writer
-import qualified Control.Monad.Trans.RWS           as RWS
-import qualified Control.Monad.Trans.RWS.Strict    as Strict
-import qualified Control.Monad.Trans.State.Strict  as Strict
-import qualified Control.Monad.Trans.Writer.Strict as Strict
 
 -- $intro
 -- Operations take place within a 'MonadLevelDB' which is built with the LevelDBT transformer; the most
