@@ -31,7 +31,9 @@ module Database.LevelDB.Higher
     -- * Batch operations
     , runBatch, putB, deleteB
     -- * Scans
-    , scan, ScanQuery(..), queryItems, queryList, queryBegins, queryCount
+    , scan, ScanQuery(..)
+    , scanStreaming, scanStreamingKeys, scanStreamingOptVal, KeyChoice(..)
+    , queryItems, queryList, queryBegins, queryCount
     -- * Context modifiers
     , withKeySpace, withOptions, withSnapshot
     , forkLevelDB
@@ -379,6 +381,83 @@ deleteB k = do
     tell [Del (ksId <> k)]
     return ()
 
+-- | Scan the keyspace in a streaming way, using a user provided
+-- yield function to extract/send the current key to a stream. If the
+-- yield function returns false, the scanning will be aborted.
+scanStreamingKeys :: (MonadLevelDB m)
+              => Key  -- ^ Key at which to start the scan.
+              -> (Key -> m Bool) -- ^ yield function
+              -> m ()
+scanStreamingKeys k yield =
+    scanStreamingKeys' k $ \key _ -> yield key
+
+scanStreamingKeys' :: (MonadLevelDB m)
+              => Key  -- ^ Key at which to start the scan.
+              -> (Key -> Iterator -> m Bool) -- ^ yield function
+              -> m ()
+scanStreamingKeys' k yield = do
+    (db, ksId, (ropt,_)) <- getDB
+    withIterator db ropt $ doScan (ksId <> k) ksId
+  where
+    doScan prefix ksId iter = do
+        iterSeek iter prefix
+        applyIterate
+      where
+        readItem = do
+            nk <- iterKey iter
+            return $
+                if sameKsId nk then (fmap (BS.drop 4) nk) --unkeyspace
+                else Nothing
+        applyIterate = do
+            item <- readItem
+            case item of
+                Just nk ->
+                    do continue <- yield nk iter
+                       when continue $
+                           do iterNext iter
+                              applyIterate
+                _ -> pure ()
+        sameKsId Nothing = False
+        sameKsId (Just nk) = BS.take 4 nk == ksId
+
+-- | Scan the keyspace in a streaming way, using a user provided
+-- yield function to extract/send the current key and value to a stream. If the
+-- yield function returns false, the scanning will be aborted.
+scanStreaming :: (MonadLevelDB m)
+              => Key  -- ^ Key at which to start the scan.
+              -> (Key -> Value -> m Bool) -- ^ yield function
+              -> m ()
+scanStreaming k yield =
+    scanStreamingKeys' k $ \key iter ->
+    do nv <- iterValue iter
+       case nv of
+         Nothing -> pure False
+         Just v -> yield key v
+
+data KeyChoice
+    = KcLoad -- ^ load the key
+    | KcIgnore -- ^ ignore the key
+    | KcStop -- ^ stop scanning
+    deriving (Show, Eq)
+
+-- | Scan the keyspace in a streaming way, using a user provided
+-- yield function to extract/send the current key and value to a stream. If the
+-- yield function returns false, the scanning will be aborted.
+scanStreamingOptVal :: (MonadLevelDB m)
+              => Key  -- ^ Key at which to start the scan.
+              -> (Key -> KeyChoice) -- ^ what todo at a key
+              -> (Key -> Value -> m Bool) -- ^ yield function
+              -> m ()
+scanStreamingOptVal k loadVal yield =
+    scanStreamingKeys' k $ \key iter ->
+    case loadVal key of
+      KcLoad ->
+          do nv <- iterValue iter
+             case nv of
+               Nothing -> pure False
+               Just v -> yield key v
+      KcIgnore -> pure True
+      KcStop -> pure False
 
 -- | Scan the keyspace, applying functions and returning results.
 -- Look at the documentation for 'ScanQuery' for more information.
